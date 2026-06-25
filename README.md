@@ -1,4 +1,3 @@
-```markdown
 # Programación Paralela con CUDA
 
 Este repositorio contiene una serie de programas desarrollados en **CUDA C/C++** para aplicar conceptos de programación paralela sobre GPU utilizando la plataforma NVIDIA CUDA.
