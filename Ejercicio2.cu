@@ -1,0 +1,73 @@
+#include <iostream>
+#include <iomanip>
+#include <chrono>
+#include <cuda_runtime.h>
+#include <thread>
+#include <vector>
+#include <numeric>
+#include "utils.h"
+
+using namespace std::chrono;
+#define THREADS 512
+#define BLOCKS	32
+#define SIZE 1000000000 
+#define TESTS	10
+
+double total_par_time = 0;
+
+double resultado_total = 0;
+
+__global__ void pi_cuda(double *acum){
+    int idx = threadIdx.x + (blockIdx.x * blockDim.x);
+    double res = 0; 
+    while(idx < SIZE){
+        if(idx % 2 == 0){
+            res += 1.0 / (2* idx + 1);
+        } else{
+            res -= 1.0 / (2* idx + 1);
+        }
+        idx += gridDim.x * blockDim.x; 
+    }
+    acum[threadIdx.x + (blockIdx.x * blockDim.x)] = res;
+}  
+
+
+int main(){
+    double *h_acum, *d_acum;
+    high_resolution_clock::time_point startTime, endTime;
+    double ms_par;
+
+    std::cout << "Version paralela... " << std::endl; 
+    
+    h_acum = new double[BLOCKS * THREADS];
+
+    cudaMalloc( (void**) &d_acum, BLOCKS * THREADS * sizeof(double));
+
+    for(int i = 0; i < TESTS; i++){
+        startTime = high_resolution_clock::now();
+
+        pi_cuda<<<BLOCKS, THREADS>>> (d_acum);
+
+        cudaMemcpy(h_acum, d_acum, BLOCKS * THREADS * sizeof(double), cudaMemcpyDeviceToHost);
+
+        double resultado_total = 0; 
+
+        for(int j = 0; j < BLOCKS * THREADS; j++){
+            resultado_total += h_acum[j]; 
+        }
+        resultado_total *= 4;
+
+        endTime = high_resolution_clock::now();
+        ms_par = duration<double, std::milli>(endTime - startTime).count();
+
+        total_par_time += ms_par;
+        std::cout << "Pi (Par): " << resultado_total << " Prueba " << i + 1 << " -> " << ms_par << " ms" << std::endl;
+    }    
+    
+    double avg_par = total_par_time / TESTS;
+
+    delete[] h_acum;
+    cudaFree(d_acum);
+
+    return 0;     
+}

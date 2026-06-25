@@ -1,0 +1,92 @@
+#include <iostream>
+#include <math.h>
+#include <chrono>
+#include <thread>
+#include <cuda_runtime.h>
+
+#define MAX 5000000
+#define TESTS 10
+#define THREADS 512
+#define BLOCKS 32
+
+__device__ bool calcularPrimo(unsigned long long); 
+__global__ void contarPrimosCUDA(unsigned long long*);
+
+using namespace std::chrono;
+
+int main(){
+    high_resolution_clock::time_point startTime, endTime;
+    double msCUDA;
+    double totalCUDATime = 0;
+    unsigned long long h_acum = 0;
+    unsigned long long *d_acum = 0;
+
+    cudaMalloc((void**) &d_acum, sizeof(unsigned long long)); //
+    
+    std::cout << "CUDA\n";
+    for(int i = 0; i < TESTS; i++){
+        //Eso es para que el contador se reinice a 0 en cada iteracion
+        cudaMemset(d_acum, 0, sizeof(unsigned long long));
+        startTime = high_resolution_clock::now();
+        
+        contarPrimosCUDA<<<BLOCKS, THREADS>>> (d_acum);
+        //El CPU espera a que acabe el gpu
+        cudaDeviceSynchronize(); 
+
+        endTime = high_resolution_clock::now();
+        cudaMemcpy(&h_acum, d_acum, sizeof(unsigned long long), cudaMemcpyDeviceToHost);
+        msCUDA = duration<double, std::milli>(endTime - startTime).count();
+        totalCUDATime += msCUDA;
+        std::cout << "Total primos CUDA: " << h_acum << " Prueba " << i + 1 << " -> " << msCUDA << " ms" << std::endl;
+    }
+
+    double speedup = 770.637 / (totalCUDATime / TESTS);
+
+    std::cout << "Tiempo promedio CUDA: " << totalCUDATime / TESTS << std::endl;
+    std::cout << "Speedup: " << speedup << std::endl;
+
+    cudaFree(d_acum);
+
+    return 0; 
+}
+
+//El device es porque esta operación se va a ejecutar el el gpu
+__device__ bool calcularPrimo(unsigned long long n) {
+    if(n < 2) return false;
+    //ulilice i * i <= n en vez de sqrt para optimizar la operacion
+    for(unsigned long long i = 2; i * i <= n; i++) { 
+        if(n % i == 0) return false;
+    }
+    return true;
+}
+
+__global__ void contarPrimosCUDA(unsigned long long *acum) {
+    __shared__ unsigned long long cache[THREADS];
+    int cacheIndex = threadIdx.x;
+    int index = threadIdx.x + (blockIdx.x * blockDim.x);
+    unsigned long long contador = 0;
+
+    while(index < MAX) {
+        if(calcularPrimo(index)){
+            contador += index;
+        }
+        index += (blockDim.x * gridDim.x); 
+    }
+    //Se guarda el resultado de cada hilo en la posicion del arreglo que le corresponde con el index
+    cache[cacheIndex] = contador; 
+    //Aqui esperamos a que todos lo hilos terminen
+    __syncthreads(); 
+
+    //reduccipn de arbol
+    int i = blockDim.x / 2;
+    while(i > 0) {
+        if (cacheIndex < i) {
+            cache[cacheIndex] = cache[cacheIndex] + cache[cacheIndex + i];
+        }
+        __syncthreads(); 
+        i /= 2;
+    }
+    if (cacheIndex == 0) {
+        atomicAdd(acum, cache[0]); 
+    }
+}
